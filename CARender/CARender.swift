@@ -29,6 +29,7 @@ struct Program {
             <input-file>          A Core Animation layer tree to render.
             <output-file>         Where to place the rendered result.
 
+            --package             Loads the input file using CAPackage.
             --renderer=[coregraphics|metal|opengl]
                 coregraphics      Renders the layer tree using a Core Graphics bitmap context.
                                   Many advanced features (e.g., filters, backdrops, meshes, some
@@ -44,6 +45,7 @@ struct Program {
     static func main() {
         var inputURL: URL? = nil
         var outputURL: URL? = nil
+        var isPackage: Bool = false
         var renderer: Renderer.Type = RendererOGLMetal.self
         var open: Bool = false
 
@@ -52,6 +54,9 @@ struct Program {
             let (baseName, value) = (argument[..<indexOfEqualSign], argument[indexOfEqualSign...].dropFirst())
 
             switch baseName {
+            case "--package":
+                isPackage = true
+
             case "--renderer":
                 switch value {
                 case "coregraphics": renderer = RendererCG.self
@@ -75,24 +80,15 @@ struct Program {
         }
 
         if let inputURL = inputURL, let outputURL = outputURL {
-            let type: String
-
-            switch inputURL.pathExtension {
-            case "caar":
-                type = kCAPackageTypeArchive
-            case "ca":
-                type = kCAPackageTypeCAMLBundle
-            case "caml":
-                type = kCAPackageTypeCAMLFile
-            default:
-                print("ERROR: unrecognized input path extension \(inputURL.pathExtension)")
-                exit(EX_DATAERR)
-            }
-
             let layer: CALayer
 
             do {
-                layer = try loadLayerTree(from: inputURL, type: type)
+                if isPackage {
+                    layer = try loadPackageLayerTree(from: inputURL)
+                } else {
+                    layer = try loadLayerTree(from: inputURL)
+                }
+
                 print("Loaded layer tree from \(inputURL.path).")
             } catch {
                 print("ERROR: could not load layer tree from input file \(inputURL.path)")
@@ -129,9 +125,27 @@ extension Optional {
     }
 }
 
-func loadLayerTree(from url: URL, type: String) throws -> CALayer {
+func loadPackageLayerTree(from url: URL) throws -> CALayer {
+    let type: String
+
+    switch url.pathExtension {
+    case "caar":
+        type = kCAPackageTypeArchive
+    case "ca":
+        type = kCAPackageTypeCAMLBundle
+    case "caml":
+        type = kCAPackageTypeCAMLFile
+    default:
+        throw "unrecognized package file extension"
+    }
+
     let package = try CAPackage(contentsOf: url, type: type, options: nil)
     return try package.rootLayer.tryUnwrap()
+}
+
+func loadLayerTree(from url: URL) throws -> CALayer {
+    let data = try Data(contentsOf: url)
+    return try NSKeyedUnarchiver.unarchivedObject(ofClass: CALayer.self, from: data).tryUnwrap()
 }
 
 struct RendererCG: Renderer {
